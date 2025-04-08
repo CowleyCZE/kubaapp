@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Organizér Textu</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+            line-height: 1.6;
+        }
+        header {
+            background-color: #4285F4;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        h1 {
+            margin: 0;
+            font-size: 1.8rem;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .input-section, .output-section {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: inherit;
+            resize: vertical;
+            margin-bottom: 10px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: inherit;
+            margin-bottom: 10px;
+        }
+        button {
+            background-color: #4285F4;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #3b78e7;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #4285F4;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            vertical-align: middle;
+            margin-left: 10px;
+        }
+        .error {
+            color: #d93025;
+            background-color: #ffebe9;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            display: none;
+        }
+        .output-content {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+        #copyBtn, #shareBtn {
+            background-color: #34a853;
+            display: none;
+        }
+        #copyBtn:hover, #shareBtn:hover {
+            background-color: #2d9749;
+        }
+        #clearBtn {
+            background-color: #ea4335;
+            display: none;
+        }
+        #clearBtn:hover {
+            background-color: #d62516;
+        }
+        h2 {
+            color: #4285F4;
+            margin-bottom: 10px;
+        }
+        ol {
+            margin-left: 20px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        strong {
+            font-weight: bold;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+            .button-group {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>AI Organizér Textu</h1>
+    </header>
+    
+    <div class="nav-bar" style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+        <a href="topics.html"><button style="background-color: #34a853;">Procházet Témata</button></a>
+    </div>
+    
+    <div class="container">
+        <div class="input-section" id="inputSection">
+            <h2>Vložte text k analýze</h2>
+            <textarea id="inputText" placeholder="Sem vložte svůj text..."></textarea>
+            <div style="margin-bottom: 10px;">
+                <label for="topicInput">Téma (volitelné):</label>
+                <input type="text" id="topicInput" placeholder="Nechte prázdné pro automatickou detekci">
+            </div>
+            <button id="processBtn">Zpracovat Text</button>
+            <div class="error" id="errorMsg"></div>
+        </div>
+        
+        <div class="loading" id="loadingIndicator">
+            Zpracování textu pomocí AI...
+        </div>
+
+        <div class="output-section" id="outputSection" style="display: none;">
+            <h2>Zpracovaný text</h2>
+            <div id="topicInfo" style="margin-bottom: 10px; color: #4285F4;"></div>
+            <div class="output-content" id="outputContent">
+                <!-- Zde bude zobrazen zpracovaný text -->
+            </div>
+            <div class="button-group" style="margin-top: 15px;">
+                <button id="clearBtn">Nový Text</button>
+                <button id="copyBtn">Kopírovat do Schránky</button>
+                <button id="shareBtn">Sdílet</button>
+                <a id="viewTopicBtn" style="display: none;"><button style="background-color: #34a853;">Zobrazit Téma</button></a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM elementy
+        const inputSection = document.getElementById('inputSection');
+        const outputSection = document.getElementById('outputSection');
+        const inputText = document.getElementById('inputText');
+        const topicInput = document.getElementById('topicInput');
+        const processBtn = document.getElementById('processBtn');
+        const outputContent = document.getElementById('outputContent');
+        const topicInfo = document.getElementById('topicInfo');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const errorMsg = document.getElementById('errorMsg');
+        const clearBtn = document.getElementById('clearBtn');
+        const copyBtn = document.getElementById('copyBtn');
+        const shareBtn = document.getElementById('shareBtn');
+        const viewTopicBtn = document.getElementById('viewTopicBtn');
+
+        // API URL
+        const apiUrl = '/api/process-text';
+
+        // Zpracování textu
+        processBtn.addEventListener('click', async () => {
+            const text = inputText.value.trim();
+            const topic = topicInput.value.trim();
+            
+            if (!text) {
+                showError('Prosím, vložte nějaký text k analýze.');
+                return;
+            }
+
+            // Zobrazit loading a skrýt errorové zprávy
+            loadingIndicator.style.display = 'block';
+            errorMsg.style.display = 'none';
+            processBtn.disabled = true;
+            
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ text, topic }),
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Zobrazit výsledek
+                    outputContent.innerHTML = data.processedText;
+                    
+                    // Zobrazit informace o tématu
+                    if (data.topic) {
+                        topicInfo.textContent = `Téma: ${data.topic.name}`;
+                        viewTopicBtn.href = `topics.html?topicId=${data.topic.id}`;
+                        viewTopicBtn.style.display = 'block';
+                    }
+                    
+                    inputSection.style.display = 'none';
+                    outputSection.style.display = 'block';
+                    
+                    // Zobrazit tlačítka pro výsledek
+                    clearBtn.style.display = 'block';
+                    copyBtn.style.display = 'block';
+                    shareBtn.style.display = 'block';
+                } else {
+                    showError(data.message || 'Došlo k chybě při zpracování textu.');
+                }
+            } catch (err) {
+                showError('Chyba při komunikaci se serverem. Zkuste to prosím znovu později.');
+                console.error('Error:', err);
+            } finally {
+                loadingIndicator.style.display = 'none';
+                processBtn.disabled = false;
+            }
+        });
+
+        // Nový text (reset)
+        clearBtn.addEventListener('click', () => {
+            inputText.value = '';
+            topicInput.value = '';
+            outputSection.style.display = 'none';
+            inputSection.style.display = 'block';
+            errorMsg.style.display = 'none';
+            viewTopicBtn.style.display = 'none';
+        });
+
+        // Kopírovat do schránky
+        copyBtn.addEventListener('click', () => {
+            const textToCopy = outputContent.innerText;
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                alert('Text byl zkopírován do schránky.');
+            }).catch(err => {
+                console.error('Nelze kopírovat: ', err);
+                alert('Nepodařilo se zkopírovat text. Zkuste to prosím znovu.');
+            });
+        });
+
+        // Sdílet
+        shareBtn.addEventListener('click', async () => {
+            const textToShare = outputContent.innerText;
+            
+            // Použití Web Share API, pokud je k dispozici
+            if (navigator.share) {
+                try {
+                    await navigator.share({
+                        title: 'AI Organizér Textu - Zpracovaný Text',
+                        text: textToShare
+                    });
+                } catch (err) {
+                    console.error('Chyba při sdílení:', err);
+                }
+            } else {
+                // Fallback pro prohlížeče, které nepodporují Web Share API
+                alert('Sdílení není v tomto prohlížeči podporováno. Můžete použít tlačítko "Kopírovat do Schránky".');
+            }
+        });
+
+        // Zobrazení chyby
+        function showError(message) {
+            errorMsg.textContent = message;
+            errorMsg.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

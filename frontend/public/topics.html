@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Témata | AI Organizér Textu</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+            line-height: 1.6;
+        }
+        header {
+            background-color: #4285F4;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        h1 {
+            margin: 0;
+            font-size: 1.8rem;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .topics-section, .texts-section {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .topic-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .topic-item:hover {
+            background-color: #f5f5f5;
+        }
+        .topic-item.active {
+            background-color: #e8f0fe;
+            border-left: 3px solid #4285F4;
+        }
+        .topic-name {
+            font-weight: bold;
+            color: #4285F4;
+        }
+        .topic-date {
+            color: #666;
+            font-size: 0.8rem;
+        }
+        .text-item {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 10px;
+        }
+        .text-preview {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+        .text-date {
+            color: #666;
+            font-size: 0.8rem;
+        }
+        .text-content {
+            margin-top: 10px;
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        .nav-bar {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .search-box {
+            display: flex;
+            gap: 10px;
+        }
+        input[type="text"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4285F4;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #3b78e7;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        .no-topics, .no-texts {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-style: italic;
+        }
+        .error {
+            color: #d93025;
+            background-color: #ffebe9;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            display: none;
+        }
+        @media (min-width: 768px) {
+            .container {
+                flex-direction: row;
+            }
+            .topics-section {
+                flex: 1;
+            }
+            .texts-section {
+                flex: 2;
+            }
+        }
+        @media (max-width: 600px) {
+            .nav-bar {
+                flex-direction: column;
+                gap: 10px;
+            }
+            .search-box {
+                width: 100%;
+            }
+            input[type="text"] {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>AI Organizér Textu - Témata</h1>
+    </header>
+    
+    <div class="nav-bar">
+        <a href="index.html"><button>Nový Text</button></a>
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="Hledat témata...">
+            <button id="searchBtn">Hledat</button>
+        </div>
+    </div>
+    
+    <div class="error" id="errorMsg"></div>
+    
+    <div class="container">
+        <div class="topics-section">
+            <h2>Témata</h2>
+            <div id="topicsList" class="topics-list">
+                <div class="loading">Načítání témat...</div>
+            </div>
+        </div>
+        
+        <div class="texts-section">
+            <h2 id="currentTopicName">Vyberte téma</h2>
+            <div id="textsList" class="texts-list">
+                <div class="no-texts">Vyberte téma pro zobrazení textů</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM elementy
+        const topicsList = document.getElementById('topicsList');
+        const textsList = document.getElementById('textsList');
+        const currentTopicName = document.getElementById('currentTopicName');
+        const searchInput = document.getElementById('searchInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const errorMsg = document.getElementById('errorMsg');
+        
+        // Aktuálně vybrané téma
+        let selectedTopicId = null;
+        
+        // API URL
+        const apiBaseUrl = '/api';
+        
+        // Načtení všech témat
+        async function loadTopics() {
+            try {
+                topicsList.innerHTML = '<div class="loading">Načítání témat...</div>';
+                
+                const response = await fetch(`${apiBaseUrl}/topics`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    renderTopics(data.topics);
+                } else {
+                    showError('Nepodařilo se načíst témata.');
+                    topicsList.innerHTML = '<div class="no-topics">Chyba při načítání témat</div>';
+                }
+            } catch (error) {
+                console.error('Error loading topics:', error);
+                showError('Chyba komunikace se serverem.');
+                topicsList.innerHTML = '<div class="no-topics">Chyba při načítání témat</div>';
+            }
+        }
+        
+        // Vyhledávání témat
+        async function searchTopics(query) {
+            try {
+                topicsList.innerHTML = '<div class="loading">Vyhledávání témat...</div>';
+                
+                const response = await fetch(`${apiBaseUrl}/topics/search?query=${encodeURIComponent(query)}`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    renderTopics(data.topics);
+                } else {
+                    showError('Nepodařilo se vyhledat témata.');
+                    topicsList.innerHTML = '<div class="no-topics">Chyba při vyhledávání témat</div>';
+                }
+            } catch (error) {
+                console.error('Error searching topics:', error);
+                showError('Chyba komunikace se serverem.');
+                topicsList.innerHTML = '<div class="no-topics">Chyba při vyhledávání témat</div>';
+            }
+        }
+        
+        // Načtení textů pro dané téma
+        async function loadTextsForTopic(topicId) {
+            try {
+                textsList.innerHTML = '<div class="loading">Načítání textů...</div>';
+                
+                const response = await fetch(`${apiBaseUrl}/topics/${topicId}/texts`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    renderTexts(data.texts);
+                } else {
+                    showError('Nepodařilo se načíst texty pro vybrané téma.');
+                    textsList.innerHTML = '<div class="no-texts">Chyba při načítání textů</div>';
+                }
+            } catch (error) {
+                console.error('Error loading texts:', error);
+                showError('Chyba komunikace se serverem.');
+                textsList.innerHTML = '<div class="no-texts">Chyba při načítání textů</div>';
+            }
+        }
+        
+        // Vykreslení seznamu témat
+        function renderTopics(topics) {
+            if (!topics || topics.length === 0) {
+                topicsList.innerHTML = '<div class="no-topics">Žádná témata nebyla nalezena</div>';
+                return;
+            }
+            
+            let html = '';
+            topics.forEach(topic => {
+                const date = new Date(topic.updatedAt).toLocaleDateString('cs-CZ');
+                const activeClass = topic.id === selectedTopicId ? 'active' : '';
+                
+                html += `
+                <div class="topic-item ${activeClass}" data-id="${topic.id}">
+                    <div class="topic-name">${topic.name}</div>
+                    <div class="topic-date">Aktualizováno: ${date}</div>
+                </div>
+                `;
+            });
+            
+            topicsList.innerHTML = html;
+            
+            // Přidání event listenerů
+            document.querySelectorAll('.topic-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const topicId = parseInt(item.dataset.id, 10);
+                    selectTopic(topicId, item.querySelector('.topic-name').textContent);
+                });
+            });
+        }
+        
+        // Vykreslení seznamu textů
+        function renderTexts(texts) {
+            if (!texts || texts.length === 0) {
+                textsList.innerHTML = '<div class="no-texts">Žádné texty pro toto téma</div>';
+                return;
+            }
+            
+            let html = '';
+            texts.forEach(text => {
+                const date = new Date(text.createdAt).toLocaleDateString('cs-CZ');
+                const preview = text.originalText.substring(0, 100) + (text.originalText.length > 100 ? '...' : '');
+                
+                html += `
+                <div class="text-item">
+                    <div class="text-date">Vytvořeno: ${date}</div>
+                    <div class="text-preview">${preview}</div>
+                    <div class="text-content">${text.processedText}</div>
+                </div>
+                `;
+            });
+            
+            textsList.innerHTML = html;
+        }
+        
+        // Výběr tématu
+        function selectTopic(topicId, topicName) {
+            selectedTopicId = topicId;
+            currentTopicName.textContent = topicName;
+            
+            // Označení vybraného tématu
+            document.querySelectorAll('.topic-item').forEach(item => {
+                item.classList.remove('active');
+                if (parseInt(item.dataset.id, 10) === topicId) {
+                    item.classList.add('active');
+                }
+            });
+            
+            // Načtení textů pro vybrané téma
+            loadTextsForTopic(topicId);
+        }
+        
+        // Zobrazení chyby
+        function showError(message) {
+            errorMsg.textContent = message;
+            errorMsg.style.display = 'block';
+            setTimeout(() => {
+                errorMsg.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Event listenery
+        searchBtn.addEventListener('click', () => {
+            const query = searchInput.value.trim();
+            if (query) {
+                searchTopics(query);
+            } else {
+                loadTopics();
+            }
+        });
+        
+        searchInput.addEventListener('keyup', (e) => {
+            if (e.key === 'Enter') {
+                searchBtn.click();
+            }
+        });
+        
+        // Inicializace
+        document.addEventListener('DOMContentLoaded', () => {
+            loadTopics();
+        });
+    </script>
+</body>
+</html>
