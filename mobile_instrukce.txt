@@ -1,0 +1,822 @@
+AI TEXT ORGANIZER - MOBILNÍ APLIKACE
+=========================================
+
+Tato mobilní aplikace používá Flutter pro vytvoření uživatelského rozhraní a komunikuje s backend serverem, který používá Gemini AI pro analýzu a strukturování textu. Aplikace také podporuje organizaci textů podle témat.
+
+ZOBRAZENÍ MOBILNÍ DOKUMENTACE
+----------------------------
+Pro zobrazení této dokumentace v prohlížeči navštivte: http://localhost:5000/
+
+POPIS FUNKČNOSTI
+------------------
+Aplikace umožňuje uživatelům:
+1. Vložit libovolný text
+2. Odeslat text k analýze pomocí AI
+3. Zobrazit zpracovaný text s automatickým číslováním a nadpisy s datem
+4. Automaticky organizovat texty podle témat
+5. Procházet texty podle témat
+6. Kopírovat a sdílet výsledek
+
+POTŘEBNÉ ZÁVISLOSTI
+-------------------
+V souboru pubspec.yaml přidejte následující závislosti:
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.5
+  http: ^1.1.0
+  provider: ^6.0.5
+  share_plus: ^7.0.2
+  flutter_spinkit: ^5.2.0
+  flutter_dotenv: ^5.1.0
+  flutter_html: ^3.0.0-beta.2  # Pro správné zobrazení HTML obsahu
+
+MODELY
+------
+Vytvořte soubor lib/models/topic.dart:
+
+```dart
+class Topic {
+  final int id;
+  final String name;
+  final String? description;
+  final DateTime updatedAt;
+
+  Topic({
+    required this.id,
+    required this.name,
+    this.description,
+    required this.updatedAt,
+  });
+
+  factory Topic.fromJson(Map<String, dynamic> json) {
+    return Topic(
+      id: json['id'],
+      name: json['name'],
+      description: json['description'],
+      updatedAt: DateTime.parse(json['updatedAt']),
+    );
+  }
+}
+```
+
+Vytvořte soubor lib/models/processed_text.dart:
+
+```dart
+class ProcessedText {
+  final int id;
+  final String originalText;
+  final String processedText;
+  final int topicId;
+  final DateTime createdAt;
+
+  ProcessedText({
+    required this.id,
+    required this.originalText,
+    required this.processedText,
+    required this.topicId,
+    required this.createdAt,
+  });
+
+  factory ProcessedText.fromJson(Map<String, dynamic> json) {
+    return ProcessedText(
+      id: json['id'],
+      originalText: json['originalText'],
+      processedText: json['processedText'],
+      topicId: json['topicId'],
+      createdAt: DateTime.parse(json['createdAt']),
+    );
+  }
+}
+```
+
+SLUŽBY
+------
+Vytvořte nebo aktualizujte soubor lib/services/text_processing_service.dart:
+
+```dart
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../models/topic.dart';
+import '../models/processed_text.dart';
+
+class TextProcessingService extends ChangeNotifier {
+  String? _processedText;
+  Topic? _currentTopic;
+  bool _isLoading = false;
+  String? _error;
+  List<Topic> _topics = [];
+  List<ProcessedText> _textsForTopic = [];
+  
+  // API URL - aktualizujte podle skutečného nasazení
+  // Pro Android emulátor: 10.0.2.2 místo localhost
+  final String _baseUrl = 'http://10.0.2.2:5000/api'; // Aktualizováno na port 5000
+  
+  String? get processedText => _processedText;
+  Topic? get currentTopic => _currentTopic;
+  bool get isLoading => _isLoading;
+  String? get error => _error;
+  List<Topic> get topics => _topics;
+  List<ProcessedText> get textsForTopic => _textsForTopic;
+
+  // Zpracování textu
+  Future<void> processText(String text, {String? topic}) async {
+    if (text.isEmpty) return;
+    
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+    
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/process-text'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'text': text,
+          if (topic != null && topic.isNotEmpty) 'topic': topic,
+        }),
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        _processedText = data['processedText'];
+        
+        if (data['topic'] != null) {
+          _currentTopic = Topic(
+            id: data['topic']['id'],
+            name: data['topic']['name'],
+            updatedAt: DateTime.now(),
+          );
+        }
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Chyba při komunikaci se serverem');
+      }
+    } catch (e) {
+      _error = 'Chyba při zpracování textu: ${e.toString()}';
+      if (kDebugMode) {
+        print('Error processing text: $e');
+      }
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // Získání všech témat
+  Future<void> loadAllTopics() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+    
+    try {
+      final response = await http.get(Uri.parse('$_baseUrl/topics'));
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        _topics = (data['topics'] as List)
+            .map((json) => Topic.fromJson(json))
+            .toList();
+      } else {
+        throw Exception('Nepodařilo se načíst témata');
+      }
+    } catch (e) {
+      _error = 'Chyba při načítání témat: ${e.toString()}';
+      if (kDebugMode) {
+        print('Error loading topics: $e');
+      }
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // Získání textů pro dané téma
+  Future<void> loadTextsForTopic(int topicId) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+    
+    try {
+      final response = await http.get(
+        Uri.parse('$_baseUrl/topics/$topicId/texts'),
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        _textsForTopic = (data['texts'] as List)
+            .map((json) => ProcessedText.fromJson(json))
+            .toList();
+            
+        // Nastavení aktuálního tématu
+        _currentTopic = _topics.firstWhere((t) => t.id == topicId);
+      } else {
+        throw Exception('Nepodařilo se načíst texty pro téma');
+      }
+    } catch (e) {
+      _error = 'Chyba při načítání textů: ${e.toString()}';
+      if (kDebugMode) {
+        print('Error loading texts for topic: $e');
+      }
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // Vyhledávání témat
+  Future<void> searchTopics(String query) async {
+    if (query.isEmpty) {
+      return loadAllTopics();
+    }
+    
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+    
+    try {
+      final response = await http.get(
+        Uri.parse('$_baseUrl/topics/search?query=${Uri.encodeComponent(query)}'),
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        _topics = (data['topics'] as List)
+            .map((json) => Topic.fromJson(json))
+            .toList();
+      } else {
+        throw Exception('Nepodařilo se vyhledat témata');
+      }
+    } catch (e) {
+      _error = 'Chyba při vyhledávání témat: ${e.toString()}';
+      if (kDebugMode) {
+        print('Error searching topics: $e');
+      }
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+  
+  // Reset stavu
+  void reset() {
+    _processedText = null;
+    _currentTopic = null;
+    _error = null;
+    notifyListeners();
+  }
+}
+```
+
+OBRAZOVKY
+---------
+Vytvořte soubor lib/screens/home_screen.dart:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/text_processing_service.dart';
+import '../widgets/text_input_widget.dart';
+import '../widgets/text_output_widget.dart';
+import 'topics_screen.dart';
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final textService = Provider.of<TextProcessingService>(context);
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('AI Organizér Textu'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.folder),
+            tooltip: 'Procházet témata',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const TopicsScreen(),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+      body: textService.processedText == null
+          ? const TextInputWidget()
+          : const TextOutputWidget(),
+    );
+  }
+}
+```
+
+Vytvořte soubor lib/screens/topics_screen.dart:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/text_processing_service.dart';
+import '../models/topic.dart';
+import 'topic_detail_screen.dart';
+
+class TopicsScreen extends StatefulWidget {
+  const TopicsScreen({Key? key}) : super(key: key);
+
+  @override
+  State<TopicsScreen> createState() => _TopicsScreenState();
+}
+
+class _TopicsScreenState extends State<TopicsScreen> {
+  final _searchController = TextEditingController();
+  
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<TextProcessingService>(context, listen: false).loadAllTopics();
+    });
+  }
+  
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textService = Provider.of<TextProcessingService>(context);
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Témata'),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                labelText: 'Hledat témata',
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.search),
+                  onPressed: () {
+                    textService.searchTopics(_searchController.text.trim());
+                  },
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+              ),
+              onSubmitted: (value) {
+                textService.searchTopics(value.trim());
+              },
+            ),
+          ),
+          Expanded(
+            child: textService.isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : textService.error != null
+                    ? Center(child: Text(textService.error!))
+                    : textService.topics.isEmpty
+                        ? const Center(child: Text('Žádná témata nebyla nalezena'))
+                        : ListView.builder(
+                            itemCount: textService.topics.length,
+                            itemBuilder: (context, index) {
+                              final topic = textService.topics[index];
+                              return _buildTopicItem(context, topic);
+                            },
+                          ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildTopicItem(BuildContext context, Topic topic) {
+    return ListTile(
+      title: Text(
+        topic.name,
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Color(0xFF4285F4),
+        ),
+      ),
+      subtitle: Text(
+        'Aktualizováno: ${_formatDate(topic.updatedAt)}',
+        style: TextStyle(
+          fontSize: 12,
+          color: Colors.grey[600],
+        ),
+      ),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => TopicDetailScreen(topicId: topic.id),
+          ),
+        );
+      },
+    );
+  }
+  
+  String _formatDate(DateTime date) {
+    return '${date.day}.${date.month}.${date.year}';
+  }
+}
+```
+
+Vytvořte soubor lib/screens/topic_detail_screen.dart:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_html/flutter_html.dart';
+import '../services/text_processing_service.dart';
+
+class TopicDetailScreen extends StatefulWidget {
+  final int topicId;
+  
+  const TopicDetailScreen({Key? key, required this.topicId}) : super(key: key);
+
+  @override
+  State<TopicDetailScreen> createState() => _TopicDetailScreenState();
+}
+
+class _TopicDetailScreenState extends State<TopicDetailScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<TextProcessingService>(context, listen: false)
+          .loadTextsForTopic(widget.topicId);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textService = Provider.of<TextProcessingService>(context);
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          textService.currentTopic?.name ?? 'Téma',
+        ),
+      ),
+      body: textService.isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : textService.error != null
+              ? Center(child: Text(textService.error!))
+              : textService.textsForTopic.isEmpty
+                  ? const Center(child: Text('Žádné texty pro toto téma'))
+                  : ListView.builder(
+                      itemCount: textService.textsForTopic.length,
+                      itemBuilder: (context, index) {
+                        final text = textService.textsForTopic[index];
+                        return Card(
+                          margin: const EdgeInsets.all(8.0),
+                          child: ExpansionTile(
+                            title: Text(
+                              'Text ${index + 1}',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            subtitle: Text(
+                              'Vytvořeno: ${_formatDate(text.createdAt)}',
+                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                            ),
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(16.0),
+                                child: Html(
+                                  data: text.processedText,
+                                  style: {
+                                    'h2': Style(
+                                      fontSize: FontSize(18.0),
+                                      color: const Color(0xFF4285F4),
+                                      margin: const EdgeInsets.only(bottom: 8.0, top: 16.0),
+                                    ),
+                                    'ol': Style(
+                                      margin: const EdgeInsets.only(left: 20.0),
+                                    ),
+                                    'li': Style(
+                                      margin: const EdgeInsets.only(bottom: 8.0),
+                                    ),
+                                    'strong': Style(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+    );
+  }
+  
+  String _formatDate(DateTime date) {
+    return '${date.day}.${date.month}.${date.year}';
+  }
+}
+```
+
+WIDGETY
+--------
+Aktualizujte soubor lib/widgets/text_input_widget.dart:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/text_processing_service.dart';
+
+class TextInputWidget extends StatefulWidget {
+  const TextInputWidget({Key? key}) : super(key: key);
+
+  @override
+  State<TextInputWidget> createState() => _TextInputWidgetState();
+}
+
+class _TextInputWidgetState extends State<TextInputWidget> {
+  final _textController = TextEditingController();
+  final _topicController = TextEditingController();
+  
+  @override
+  void dispose() {
+    _textController.dispose();
+    _topicController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textService = Provider.of<TextProcessingService>(context);
+    
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Vložte text k analýze a organizaci',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF4285F4),
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _textController,
+            decoration: const InputDecoration(
+              hintText: 'Například: Koupit mléko, zavolat Petrovi, dokončit prezentaci...',
+              border: OutlineInputBorder(),
+              filled: true,
+              fillColor: Color(0xFFF5F5F5),
+            ),
+            maxLines: 8,
+            textInputAction: TextInputAction.newline,
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _topicController,
+            decoration: const InputDecoration(
+              labelText: 'Téma (volitelné)',
+              hintText: 'Ponechte prázdné pro automatickou detekci',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: textService.isLoading
+                ? null
+                : () {
+                    final text = _textController.text.trim();
+                    final topic = _topicController.text.trim();
+                    
+                    if (text.isNotEmpty) {
+                      textService.processText(text, topic: topic.isNotEmpty ? topic : null);
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Prosím vložte text k analýze'),
+                        ),
+                      );
+                    }
+                  },
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              backgroundColor: const Color(0xFF4285F4),
+            ),
+            child: textService.isLoading
+                ? const CircularProgressIndicator(color: Colors.white)
+                : const Text(
+                    'ANALYZOVAT TEXT',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+          ),
+          if (textService.error != null) ...[
+            const SizedBox(height: 16),
+            Text(
+              textService.error!,
+              style: const TextStyle(
+                color: Colors.red,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+```
+
+Aktualizujte soubor lib/widgets/text_output_widget.dart:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_html/flutter_html.dart';
+import 'package:share_plus/share_plus.dart';
+import '../services/text_processing_service.dart';
+
+class TextOutputWidget extends StatelessWidget {
+  const TextOutputWidget({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final textService = Provider.of<TextProcessingService>(context);
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  'Téma: ${textService.currentTopic?.name ?? "Nezařazeno"}',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF4285F4),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.copy),
+                tooltip: 'Kopírovat text',
+                onPressed: () {
+                  final plainText = _stripHtml(textService.processedText ?? '');
+                  Clipboard.setData(ClipboardData(text: plainText));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Text zkopírován do schránky'),
+                    ),
+                  );
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.share),
+                tooltip: 'Sdílet',
+                onPressed: () {
+                  final plainText = _stripHtml(textService.processedText ?? '');
+                  Share.share(plainText);
+                },
+              ),
+            ],
+          ),
+          const Divider(),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Html(
+                data: textService.processedText ?? '',
+                style: {
+                  'h2': Style(
+                    fontSize: FontSize(20.0),
+                    color: const Color(0xFF4285F4),
+                    margin: const EdgeInsets.only(bottom: 8.0, top: 16.0),
+                  ),
+                  'ol': Style(
+                    margin: const EdgeInsets.only(left: 20.0),
+                  ),
+                  'li': Style(
+                    margin: const EdgeInsets.only(bottom: 8.0),
+                  ),
+                  'strong': Style(
+                    fontWeight: FontWeight.bold,
+                  ),
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () {
+              textService.reset();
+            },
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              backgroundColor: Colors.grey[800],
+            ),
+            child: const Text(
+              'NOVÝ TEXT',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  String _stripHtml(String htmlString) {
+    RegExp exp = RegExp(r"<[^>]*>", multiLine: true, caseSensitive: true);
+    return htmlString.replaceAll(exp, '\n').replaceAll('&lt;', '<').replaceAll('&gt;', '>');
+  }
+}
+```
+
+HLAVNÍ APLIKACE
+---------------
+Aktualizujte soubor lib/main.dart:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'screens/home_screen.dart';
+import 'services/text_processing_service.dart';
+
+void main() {
+  runApp(
+    ChangeNotifierProvider(
+      create: (context) => TextProcessingService(),
+      child: const MyApp(),
+    ),
+  );
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'AI Text Organizer',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        primaryColor: const Color(0xFF4285F4),
+        scaffoldBackgroundColor: Colors.white,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF4285F4),
+          elevation: 0,
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF4285F4),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
+```
+
+TESTOVÁNÍ
+---------
+Pro správnou funkčnost aplikace je třeba otestovat:
+
+1. Spuštění backendu na správné IP adrese a portu
+2. Přidání nového textu a jeho zpracování
+3. Automatickou detekci témat
+4. Vyhledávání v tématech
+5. Zobrazení textů v rámci jednoho tématu
+
+API je dostupné na http://localhost:5000/api
+Webová dokumentace je dostupná na http://localhost:5000/
+
+Pro správné fungování mobilní aplikace s backendem je třeba upravit adresu v text_processing_service.dart tak, aby odpovídala vaší síťové konfiguraci pro přístup k backendu.
